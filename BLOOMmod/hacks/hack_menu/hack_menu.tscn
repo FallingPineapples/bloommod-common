@@ -1,0 +1,53 @@
+[gd_scene load_steps=3 format=3 uid="uid://bgj0hfged6kmk"]
+
+[ext_resource type="Theme" uid="uid://db0tc6vdbv8oe" path="res://BLOOMmod/theme.tres" id="1_mcpwd"]
+[ext_resource type="Script" path="res://BLOOMmod/hacks/hack_menu/hack_menu.gd" id="2_yynaq"]
+
+[node name="hack_menu" type="Window"]
+title = "hack_menu"
+initial_position = 2
+size = Vector2i(800, 600)
+theme = ExtResource("1_mcpwd")
+script = ExtResource("2_yynaq")
+
+[node name="Tabs" type="TabContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Hacks" type="Tree" parent="Tabs"]
+layout_mode = 2
+hide_root = true
+
+[node name="Scripts" type="Tree" parent="Tabs"]
+visible = false
+layout_mode = 2
+hide_root = true
+
+[node name="ShowInternal" type="CheckButton" parent="."]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -44.0
+offset_bottom = 24.0
+grow_horizontal = 0
+text = "Show Internal"
+alignment = 2
+
+[node name="LoadScript" type="FileDialog" parent="."]
+title = "Open a File"
+size = Vector2i(800, 600)
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.gd ; GDScript Files")
+
+[connection signal="close_requested" from="." to="." method="hide"]
+[connection signal="visibility_changed" from="." to="." method="update"]
+[connection signal="tab_changed" from="Tabs" to="." method="update" unbinds=1]
+[connection signal="item_edited" from="Tabs/Hacks" to="." method="_on_hacks_item_edited"]
+[connection signal="custom_popup_edited" from="Tabs/Scripts" to="." method="_on_scripts_custom_popup_edited"]
+[connection signal="toggled" from="ShowInternal" to="." method="update" unbinds=1]
+[connection signal="file_selected" from="LoadScript" to="." method="_on_load_script_file_selected"]

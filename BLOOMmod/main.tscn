@@ -1,0 +1,40 @@
+[gd_scene load_steps=4 format=3 uid="uid://bt7h245d0b7c7"]
+
+[ext_resource type="Script" path="res://BLOOMmod/main.gd" id="1_e5p8q"]
+[ext_resource type="PackedScene" uid="uid://frjnal0offhv" path="res://BLOOMmod/input_editor/input_editor.tscn" id="2_3y3i6"]
+[ext_resource type="PackedScene" uid="uid://bgj0hfged6kmk" path="res://BLOOMmod/hacks/hack_menu/hack_menu.tscn" id="3_hvxrj"]
+
+[node name="main" type="Node"]
+script = ExtResource("1_e5p8q")
+
+[node name="input_editor" parent="." instance=ExtResource("2_3y3i6")]
+visible = false
+
+[node name="hack_menu" parent="." instance=ExtResource("3_hvxrj")]
+visible = false
+
+[node name="dialogs" type="Node" parent="."]
+
+[node name="save" type="FileDialog" parent="dialogs"]
+size = Vector2i(800, 600)
+ok_button_text = "Save"
+access = 2
+
+[node name="load" type="FileDialog" parent="dialogs"]
+title = "Open a File"
+size = Vector2i(800, 600)
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+
+[node name="encode" type="FileDialog" parent="dialogs"]
+title = "Encode to file..."
+size = Vector2i(800, 600)
+ok_button_text = "Encode"
+mode_overrides_title = false
+access = 2
+filters = PackedStringArray("*.avi ; AVI container (MPJEG, uncompressed audio)", "*.png; PNG image sequence + WAV audio")
+
+[connection signal="file_selected" from="dialogs/save" to="." method="save_tas"]
+[connection signal="file_selected" from="dialogs/load" to="." method="load_tas"]
+[connection signal="file_selected" from="dialogs/encode" to="." method="encode_tas"]
