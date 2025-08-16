@@ -127,6 +127,7 @@ func _process(delta):
 	update_recording()
 	balance_distribution(10000)
 	update_rendering()
+	Hacks.call_hook_enabled('process')
 
 func update_frame(delta):
 	if paused:
