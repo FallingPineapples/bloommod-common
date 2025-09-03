@@ -22,6 +22,9 @@ var state_frames = []
 var state_trees = []
 var state_queued_hacks = []
 
+var requested_targets = []
+var _FRAME_SIGNAL_FMT = "_frame_%d"
+
 var _states_locked = false
 var _queued_invalidation = -1
 
@@ -371,13 +374,43 @@ func flush_hack_queue(state):
 		Hacks.call_hook('tree_enable', hack_id, [tree], frame)
 	state_queued_hacks[state] = []
 
+func request_state_at(frame):
+	var sig_name = StringName(_FRAME_SIGNAL_FMT % frame)
+	if not has_user_signal(sig_name):
+		add_user_signal(sig_name, [{'name':"tree",'type':TYPE_OBJECT}])
+	if not requested_targets.has(frame):
+		requested_targets.append(frame)
+	return Signal(self, sig_name)
+
+func check_all_requested_targets():
+	for target in requested_targets:
+		if state_frames.has(target):
+			check_requested_targets(state_frames.find(target))
+
+func check_requested_targets(state):
+	var frame = state_frames[state]
+	if requested_targets.has(frame):
+		requested_targets.erase(frame)
+		emit_signal(_FRAME_SIGNAL_FMT % frame, state_trees[state])
+
 func get_hotspots():
-	var out = []
+	var hotspots = []
 	if paused or reverse:
 		# when possible, omit moving hotspots for smoothness
-		out.append(target_frame)
-	out.append_array(bookmarks)
-	return out
+		hotspots.append(target_frame)
+	hotspots.append_array(bookmarks)
+	return hotspots
+
+func get_targets():
+	# target_frame needs to be rendered, so it is added unconditionally
+	var targets = [target_frame]
+	targets.append_array(requested_targets)
+	for hotspot in get_hotspots():
+		for target_rate in [1, 23, 47, 89, 409, 1499, 4013, 14503]:
+			var target = floori(hotspot / target_rate) * target_rate
+			if target >= 0 and target not in targets:
+				targets.append(target)
+	return targets
 
 func balance_distribution(max_usec):
 	if _states_locked:
@@ -392,14 +425,9 @@ func balance_distribution(max_usec):
 
 # TODO: trim the ton of states after the target
 func _balance_distribution(max_usec):
+	check_all_requested_targets()
 	var end_usec = Time.get_ticks_usec() + max_usec
-	# target_frame needs to be rendered, so it is added unconditionally
-	var targets = [target_frame]
-	for hotspot in get_hotspots():
-		for target_rate in [1, 23, 47, 89, 409, 1499, 4013, 14503]:
-			var target = floori(hotspot / target_rate) * target_rate
-			if target >= 0 and target not in targets:
-				targets.append(target)
+	var targets = get_targets()
 	var states_used = []
 	states_used.resize(len(state_frames))
 	states_used.fill(false)
@@ -448,6 +476,7 @@ func _balance_distribution(max_usec):
 			advance_state(fastest_state)
 			if Time.get_ticks_usec() > end_usec:
 				return
+		check_requested_targets(fastest_state)
 		states_used[fastest_state] = true
 
 func update_rendering():
