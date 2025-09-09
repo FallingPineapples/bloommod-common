@@ -382,6 +382,10 @@ func request_state_at(frame):
 		requested_targets.append(frame)
 	return Signal(self, sig_name)
 
+func request_tree_at(frame):
+	var state : int = await request_state_at(frame)
+	return clone_tree(state_trees[state])
+
 func check_all_requested_targets():
 	for target in requested_targets:
 		if state_frames.has(target):
@@ -391,7 +395,7 @@ func check_requested_targets(state):
 	var frame = state_frames[state]
 	if requested_targets.has(frame):
 		requested_targets.erase(frame)
-		emit_signal(_FRAME_SIGNAL_FMT % frame, state_trees[state])
+		emit_signal(_FRAME_SIGNAL_FMT % frame, state)
 
 func get_hotspots():
 	var hotspots = []
