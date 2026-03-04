@@ -336,10 +336,11 @@ func new_state():
 	state_queued_hacks.append(Hacks.enabled_hacks.duplicate())
 
 func clone_tree(from):
+	Hacks.call_hook_enabled('tree_before_clone', [from])
 	var tree = from.duplicate()
 	RenderingServer.viewport_set_update_mode(tree.root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
 	tree.set_meta(&'hacks_enabled', from.get_meta(&'hacks_enabled').duplicate())
-	Hacks.call_hook_enabled('tree_clone', [tree])
+	Hacks.call_hook_enabled('tree_after_clone', [tree, from])
 	return tree
 
 func clone_state(state):
