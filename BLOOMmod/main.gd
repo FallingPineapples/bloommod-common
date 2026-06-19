@@ -213,19 +213,22 @@ func update_input_editor(full=false):
 		else:
 			$input_editor.redraw()
 
-func get_input_events(frame):
+func get_input(frame):
 	if frame >= len(inputs):
 		return []
-	return convert_input_events(inputs[frame])
+	return inputs[frame]
 
-func convert_input_events(input_events):
-	var out = []
-	for input in input_events:
-		if input is InputEventAction:
-			out.append_array(convert_action(input))
+func get_input_events(frame):
+	return convert_input_events(get_input(frame))
+
+func convert_input_events(input):
+	var input_events = []
+	for event in input:
+		if event is InputEventAction:
+			input_events.append_array(convert_action(event))
 			continue
-		out.append(input)
-	return out
+		input_events.append(event)
+	return input_events
 
 func convert_action(input):
 	var events = InputMap.action_get_events(input.action)
@@ -353,12 +356,13 @@ func advance_state(state):
 	flush_hack_queue(state)
 	var tree = state_trees[state]
 	var frame = state_frames[state]
-	var input_events = get_input_events(frame)
-	advance_tree(tree, input_events, frame)
+	var input = get_input(frame)
+	advance_tree(tree, input, frame)
 	state_frames[state] += 1
 
-func advance_tree(tree, input_events, frame=-1):
+func advance_tree(tree, input, frame=-1):
 	var input_object = tree.get_input_object()
+	var input_events = convert_input_events(input)
 	for event in input_events:
 		if event is InputEvent:
 			input_object.parse_input_event(event)
