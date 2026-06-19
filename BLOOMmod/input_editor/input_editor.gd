@@ -63,11 +63,11 @@ func update_hacks():
 	hack_actions.clear()
 	hack_widths.clear()
 	hack_ids = {}
-	var Hacks = bloommod.Hacks
-	for id in range(len(Hacks.hacks)):
-		if not Hacks.hack_scheduled[id]:
+	var hacks = bloommod.hacks
+	for id in range(len(hacks.hacks)):
+		if not hacks.hack_scheduled[id]:
 			continue
-		var hack = Hacks.hacks[id]
+		var hack = hacks.hacks[id]
 		hack_lookup[id] = len(hack_actions)
 		hack_ids[hack] = id
 		hack_actions.append(hack)
@@ -308,7 +308,7 @@ func record(from_frame, to_frame):
 		for action in tab:
 			var value
 			if is_hacks_tab(tab_id):
-				value = bloommod.Hacks.is_hack_enabled(hack_ids[action], from_frame, false)
+				value = bloommod.hacks.is_hack_enabled(hack_ids[action], from_frame, false)
 				set_actions(from_frame + 1, to_frame, action, value, tab_id)
 			else:
 				value = Input.is_action_pressed(action)

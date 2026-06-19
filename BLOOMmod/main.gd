@@ -1,6 +1,6 @@
 extends Node
 
-var Hacks = preload("res://BLOOMmod/hacks/manager.gd")
+const hacks = preload("res://BLOOMmod/hacks/manager.gd")
 
 var target_frame = 0
 var bookmarks = []
@@ -40,9 +40,9 @@ func _ready():
 		$input_editor.window_input.connect(_input)
 		bookmarks.resize(35)
 		bookmarks.fill(0)
-	Hacks.bloom = self
-	Hacks.load_internal_scripts()
-	Hacks.load_script('autoexec.gd')
+	hacks.bloom = self
+	hacks.load_internal_scripts()
+	hacks.load_script('autoexec.gd')
 	if encoding:
 		_start_encode()
 
@@ -113,7 +113,7 @@ func _input(event):
 						pass # TODO: notify user?
 				KEY_E:
 					$dialogs/encode.popup_centered()
-	Hacks.call_hook_enabled_at('input', target_frame, [event])
+	hacks.call_hook_enabled_at('input', target_frame, [event])
 
 # TODO: warn when closing without saving
 
@@ -130,7 +130,7 @@ func _process(delta):
 	update_recording()
 	balance_distribution(10000)
 	update_rendering()
-	Hacks.call_hook_enabled('process')
+	hacks.call_hook_enabled('process')
 
 func update_frame(delta):
 	if paused:
@@ -262,14 +262,14 @@ func invalidate_after(frame):
 			_queued_invalidation = min(_queued_invalidation, frame)
 	else:
 		_invalidate_after(frame)
-	Hacks.invalidate_after(frame)
+	hacks.invalidate_after(frame)
 	update_hack_menu()
 
 func _invalidate_after(frame):
 	var i = 0
 	while i < len(state_frames):
 		if state_frames[i] > frame:
-			Hacks.call_hook_enabled('tree_delete', [state_trees[i]])
+			hacks.call_hook_enabled('tree_delete', [state_trees[i]])
 			state_frames.remove_at(i)
 			state_trees.pop_at(i).free()
 			state_queued_hacks.remove_at(i)
@@ -301,7 +301,7 @@ func on_hack_disabled(hack_id):
 	for state in len(state_frames):
 		var i = state_queued_hacks[state].find(hack_id)
 		if i == -1:
-			Hacks.call_hook('tree_disable', hack_id, [state_trees[state]], state_frames[state])
+			hacks.call_hook('tree_disable', hack_id, [state_trees[state]], state_frames[state])
 		else:
 			state_queued_hacks[state].remove_at(i)
 		_set_hack_enabled(state_trees[state], hack_id, false)
@@ -313,13 +313,13 @@ func on_hack_event(tree, frame, event):
 		_set_hack_enabled(tree, event[0], event[1])
 	elif not _get_hack_enabled(tree, event[0]):
 		return
-	Hacks.on_hack_event(tree, frame, event)
+	hacks.on_hack_event(tree, frame, event)
 
 func add_current_hack_event(userdata, frame):
-	Hacks.add_current_hack_event(userdata, frame)
+	hacks.add_current_hack_event(userdata, frame)
 
 func get_current_frame():
-	return Hacks.current_frame
+	return hacks.current_frame
 
 func update_hack_menu():
 	$hack_menu.update()
@@ -329,21 +329,21 @@ func new_tree():
 	tree.setup(ProjectSettings.get_setting("application/run/main_scene"))
 	RenderingServer.viewport_set_update_mode(tree.root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
 	tree.set_meta(&'hacks_enabled', [])
-	Hacks.call_hook_enabled('tree_create', [tree])
+	hacks.call_hook_enabled('tree_create', [tree])
 	return tree
 
 func new_state():
 	var tree = new_tree()
 	state_trees.append(tree)
 	state_frames.append(0)
-	state_queued_hacks.append(Hacks.enabled_hacks.duplicate())
+	state_queued_hacks.append(hacks.enabled_hacks.duplicate())
 
 func clone_tree(from):
-	Hacks.call_hook_enabled('tree_before_clone', [from])
+	hacks.call_hook_enabled('tree_before_clone', [from])
 	var tree = from.duplicate()
 	RenderingServer.viewport_set_update_mode(tree.root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
 	tree.set_meta(&'hacks_enabled', from.get_meta(&'hacks_enabled').duplicate())
-	Hacks.call_hook_enabled('tree_after_clone', [tree, from])
+	hacks.call_hook_enabled('tree_after_clone', [tree, from])
 	return tree
 
 func clone_state(state):
@@ -368,15 +368,15 @@ func advance_tree(tree, input, frame=-1):
 			input_object.parse_input_event(event)
 		else:
 			on_hack_event(tree, frame, event)
-	Hacks.call_hook_filtered('tree_before_tick', tree.get_meta(&'hacks_enabled'), [tree], frame)
+	hacks.call_hook_filtered('tree_before_tick', tree.get_meta(&'hacks_enabled'), [tree], frame)
 	tree.frame()
-	Hacks.call_hook_filtered('tree_after_tick', tree.get_meta(&'hacks_enabled'), [tree], frame)
+	hacks.call_hook_filtered('tree_after_tick', tree.get_meta(&'hacks_enabled'), [tree], frame)
 
 func flush_hack_queue(state):
 	var tree = state_trees[state]
 	var frame = state_frames[state]
 	for hack_id in state_queued_hacks[state]:
-		Hacks.call_hook('tree_enable', hack_id, [tree], frame)
+		hacks.call_hook('tree_enable', hack_id, [tree], frame)
 	state_queued_hacks[state] = []
 
 func request_state_at(frame):
@@ -497,7 +497,7 @@ func update_rendering():
 			RenderingServer.viewport_set_update_mode(state_trees[state].root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_WHEN_VISIBLE)
 			rendered_state = state
 			flush_hack_queue(state)
-			Hacks.call_hook_enabled('tree_render', [state_trees[state]])
+			hacks.call_hook_enabled('tree_render', [state_trees[state]])
 			update_hack_menu()
 			break
 
@@ -520,7 +520,7 @@ func save_tas(path):
 					push_warning("Could not save hack data; unsupported data type: %s" % input.get_class())
 				else:
 					var data = Marshalls.variant_to_base64(input[1], false)
-					f.store_line(':' + Hacks.hacks[input[0]] + ':' + data)
+					f.store_line(':' + hacks.hacks[input[0]] + ':' + data)
 			else:
 				push_warning("Could not save unknown input type: %s" % input.get_class())
 		count += 1
@@ -553,7 +553,7 @@ func load_tas(path):
 			if len(event_data) != 2:
 				push_warning("Could not decode '%s' (no separator)" % line)
 				continue
-			var hack_id = Hacks.hacks.find(event_data[0])
+			var hack_id = hacks.hacks.find(event_data[0])
 			if hack_id == -1:
 				push_warning("Hack '%s' does not exist (script not loaded?)" % event_data[0])
 				continue
