@@ -1,5 +1,7 @@
 extends Window
 
+const inpututils = preload("res://BLOOMmod/utils/inputs.gd")
+
 # https://www.youtube.com/watch?v=4Na0Jk2WeVw
 
 var frame_width = 100
@@ -62,7 +64,8 @@ func calculate_tabs():
 func update_hacks():
 	hack_actions.clear()
 	hack_widths.clear()
-	hack_ids = {}
+	hack_ids.clear()
+	hack_lookup.clear()
 	var hacks = bloommod.hacks
 	for id in range(len(hacks.hacks)):
 		if not hacks.hack_scheduled[id]:
@@ -122,181 +125,6 @@ func draw_data(canvas, position, text):
 			(position.y + 0.5) * row_height - (descent - ascent) / 2),
 		text, HORIZONTAL_ALIGNMENT_CENTER, current_widths[position.x], font_size)
 
-func get_action(frame, action, tab_id=-1):
-	if tab_id == -1:
-		tab_id = tabbar.current_tab
-	var hack_id
-	if is_hacks_tab(tab_id):
-		hack_id = hack_ids[action]
-	for f in range(frame, -1, -1):
-		var data = bloommod.inputs[f]
-		for i in range(len(data) - 1, -1, -1):
-			var event = data[i]
-			if is_hacks_tab(tab_id):
-				if not event is Array:
-					continue
-				if event[1] is bool and hack_id == event[0]:
-					return event[1]
-			else:
-				if not event is InputEventAction:
-					continue
-				if action == event.action:
-					return event.pressed
-	return false
-
-func toggle_action(frame, action, tab_id=-1):
-	var value = not get_action(frame, action, tab_id)
-	_update_edge(frame, action, value, false, tab_id)
-	_update_edge(frame, action, value, true, tab_id)
-	_invalidate_after(frame)
-	return value
-
-func set_actions(frame_from, frame_to, action, value, tab_id=-1):
-	if tab_id == -1:
-		tab_id = tabbar.current_tab
-	var hack_id
-	if is_hacks_tab(tab_id):
-		hack_id = hack_ids[action]
-	if frame_from > frame_to:
-		var tmp = frame_from
-		frame_from = frame_to
-		frame_to = tmp
-	var old_from = get_action(frame_from, action, tab_id)
-	var old_to = get_action(frame_to, action, tab_id)
-	if value != old_from:
-		_update_edge(frame_from, action, value, false, tab_id)
-	for frame in range(frame_from + 1, frame_to + 1):
-		if is_hacks_tab(tab_id):
-			bloommod.inputs[frame] = bloommod.inputs[frame].filter(func(event):
-				return (not event is Array) or (not event[1] is bool) or (event[0] != hack_id)
-			)
-		else:
-			bloommod.inputs[frame] = bloommod.inputs[frame].filter(func(event):
-				return (not event is InputEventAction) or (event.action != action)
-			)
-	if value != old_to:
-		_update_edge(frame_to, action, value, true, tab_id)
-	_invalidate_after(frame_from)
-
-func get_swift_action(frame, action, tab_id=-1):
-	if tab_id == -1:
-		tab_id = tabbar.current_tab
-	var hack_id
-	if is_hacks_tab(tab_id):
-		hack_id = hack_ids[action]
-	var count = 0
-	var data = bloommod.inputs[frame]
-	for i in range(len(data) - 1, -1, -1):
-		var event = data[i]
-		if is_hacks_tab(tab_id):
-			if not event is Array:
-				continue
-			if event[1] is bool and hack_id == event[0]:
-				count += 1
-		else:
-			if not event is InputEventAction:
-				continue
-			if action == event.action:
-				count += 1
-	return (count >= 2)
-
-func _add_swift_action(frame, action, tab_id=-1):
-	if tab_id == -1:
-		tab_id = tabbar.current_tab
-	var hack_id
-	if is_hacks_tab(tab_id):
-		hack_id = hack_ids[action]
-	var end_value = get_action(frame, action, tab_id)
-	for i in range(2):
-		var value = (end_value == bool(i))
-		var event
-		if is_hacks_tab(tab_id):
-			event = [hack_id, value]
-		else:
-			event = InputEventAction.new()
-			event.action = action
-			event.pressed = (value)
-		bloommod.inputs[frame].append(event)
-	_invalidate_after(frame)
-
-func _remove_swift_action(frame, action, tab_id=-1):
-	if tab_id == -1:
-		tab_id = tabbar.current_tab
-	var count = {&'v': 0} # box for lambda capture by reference
-	if is_hacks_tab(tab_id):
-		var hack_id = hack_ids[action]
-		bloommod.inputs[frame] = bloommod.inputs[frame].filter(func(event):
-			if (count.v >= 2) or (not event is Array) or (not event[1] is bool) or (event[0] != hack_id):
-				return true
-			count.v += 1
-			return false
-		)
-	else:
-		bloommod.inputs[frame] = bloommod.inputs[frame].filter(func(event):
-			if (count.v >= 2) or (not event is InputEventAction) or (event.action != action):
-				return true
-			count.v += 1
-			return false
-		)
-	_invalidate_after(frame)
-
-func set_swift_action(frame, action, value, tab_id=-1):
-	var old_value = get_swift_action(frame, action, tab_id)
-	if old_value != value:
-		if value:
-			_add_swift_action(frame, action, tab_id)
-		else:
-			_remove_swift_action(frame, action, tab_id)
-
-func toggle_swift_action(frame, action, tab_id=-1):
-	if get_swift_action(frame, action, tab_id):
-		_remove_swift_action(frame, action, tab_id)
-		return false
-	else:
-		_add_swift_action(frame, action, tab_id)
-		return true
-
-func _update_edge(frame, action, value, trailing, tab_id=-1):
-	if tab_id == -1:
-		tab_id = tabbar.current_tab
-	var hack_id
-	if is_hacks_tab(tab_id):
-		hack_id = hack_ids[action]
-	if frame + int(trailing) >= len(bloommod.inputs):
-		return
-	var data = bloommod.inputs[frame + int(trailing)]
-	var order = range(len(data)) if trailing else range(len(data)-1, -1, -1)
-	for i in order:
-		if is_hacks_tab(tab_id):
-			var event = data[i]
-			if not event is Array:
-				continue
-			if not event[1] is bool:
-				continue
-			if event[0] != hack_id:
-				continue
-			data.pop_at(i)
-			return
-		else:
-			var event = data[i]
-			if not event is InputEventAction:
-				continue
-			if event.action != action:
-				continue
-			data.pop_at(i)
-			return
-	var event
-	if is_hacks_tab(tab_id):
-		event = [hack_id, value != trailing]
-	else:
-		event = InputEventAction.new()
-		event.action = action
-		event.pressed = (value != trailing)
-	if trailing:
-		data.insert(0, event)
-	else:
-		data.append(event)
-
 func _invalidate_after(frame):
 	main.queue_redraw()
 	bloommod.invalidate_after(frame)
@@ -309,9 +137,10 @@ func record(from_frame, to_frame):
 			var value
 			if is_hacks_tab(tab_id):
 				value = bloommod.hacks.is_hack_enabled(hack_ids[action], from_frame, false)
-				set_actions(from_frame + 1, to_frame, action, value, tab_id)
+				inpututils.set_actions(from_frame + 1, to_frame, action, value, tab_id)
 			else:
 				value = Input.is_action_pressed(action)
-				set_actions(from_frame, to_frame - 1, action, value, tab_id)
+				inpututils.set_actions(from_frame, to_frame - 1, action, value, tab_id)
 	if visible:
 		redraw()
+	bloommod.invalidate_after(from_frame)

@@ -2,6 +2,7 @@ extends Node
 
 const hacks = preload("res://BLOOMmod/hacks/manager.gd")
 const treeutils = preload("res://BLOOMmod/utils/tree.gd")
+const inpututils = preload("res://BLOOMmod/utils/inputs.gd")
 
 var target_frame = 0
 var bookmarks = []
@@ -214,11 +215,6 @@ func update_input_editor(full=false):
 		else:
 			$input_editor.redraw()
 
-func get_input(frame):
-	if frame >= len(inputs):
-		return []
-	return inputs[frame]
-
 func invalidate_after(frame):
 	if _states_locked:
 		if _queued_invalidation == -1:
@@ -284,7 +280,7 @@ func advance_state(state):
 	flush_hack_queue(state)
 	var tree = state_trees[state]
 	var frame = state_frames[state]
-	var input = get_input(frame)
+	var input = inpututils.get_input(inputs, frame)
 	treeutils.advance_tree(tree, input, frame)
 	state_frames[state] += 1
 
