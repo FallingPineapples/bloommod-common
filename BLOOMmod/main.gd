@@ -1,6 +1,7 @@
 extends Node
 
 const hacks = preload("res://BLOOMmod/hacks/manager.gd")
+const treeutils = preload("res://BLOOMmod/utils/tree.gd")
 
 var target_frame = 0
 var bookmarks = []
@@ -218,42 +219,6 @@ func get_input(frame):
 		return []
 	return inputs[frame]
 
-func get_input_events(frame):
-	return convert_input_events(get_input(frame))
-
-func convert_input_events(input):
-	var input_events = []
-	for event in input:
-		if event is InputEventAction:
-			input_events.append_array(convert_action(event))
-			continue
-		input_events.append(event)
-	return input_events
-
-func convert_action(input):
-	var events = InputMap.action_get_events(input.action)
-	if len(events) <= 0:
-		return []
-	var event = events[0].duplicate()
-	if event.device == -1:
-		event.device = 0
-	if event is InputEventKey:
-		event.pressed = input.pressed
-		var keycode = 0
-		if event.keycode != 0:
-			keycode = event.keycode
-		elif event.physical_keycode != 0:
-			keycode = event.physical_keycode
-		event.keycode = keycode
-		event.physical_keycode = keycode
-		event.key_label = keycode
-		if (keycode >= 0x20 and keycode != 0x7f) and keycode < 0x10ffff and not (keycode >= 0xd800 and keycode <= 0xdfff):
-			event.unicode = keycode # TODO: Do this more accurately
-	if event is InputEventJoypadButton:
-		event.pressed = input.pressed
-	# TODO: more types of events
-	return [event]
-
 func invalidate_after(frame):
 	if _states_locked:
 		if _queued_invalidation == -1:
@@ -280,22 +245,10 @@ func _invalidate_after(frame):
 		else:
 			i += 1
 
-func _set_hack_enabled(tree, hack_id, value):
-		var data = tree.get_meta(&'hacks_enabled')
-		while len(data) <= hack_id:
-			data.append(false)
-		data[hack_id] = value
-
-func _get_hack_enabled(tree, hack_id):
-		var data = tree.get_meta(&'hacks_enabled')
-		if len(data) <= hack_id:
-			return false
-		return data[hack_id]
-
 func on_hack_enabled(hack_id):
 	for state in len(state_frames):
 		state_queued_hacks[state].append(hack_id)
-		_set_hack_enabled(state_trees[state], hack_id, true)
+		treeutils._set_hack_enabled(state_trees[state], hack_id, true)
 
 func on_hack_disabled(hack_id):
 	for state in len(state_frames):
@@ -304,16 +257,7 @@ func on_hack_disabled(hack_id):
 			hacks.call_hook('tree_disable', hack_id, [state_trees[state]], state_frames[state])
 		else:
 			state_queued_hacks[state].remove_at(i)
-		_set_hack_enabled(state_trees[state], hack_id, false)
-
-func on_hack_event(tree, frame, event):
-	if event[1] is bool:
-		if _get_hack_enabled(tree, event[0]) == event[1]:
-			return
-		_set_hack_enabled(tree, event[0], event[1])
-	elif not _get_hack_enabled(tree, event[0]):
-		return
-	hacks.on_hack_event(tree, frame, event)
+		treeutils._set_hack_enabled(state_trees[state], hack_id, false)
 
 func add_current_hack_event(userdata, frame):
 	hacks.add_current_hack_event(userdata, frame)
@@ -324,30 +268,14 @@ func get_current_frame():
 func update_hack_menu():
 	$hack_menu.update()
 
-func new_tree():
-	var tree = SceneTree.new()
-	tree.setup(ProjectSettings.get_setting("application/run/main_scene"))
-	RenderingServer.viewport_set_update_mode(tree.root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
-	tree.set_meta(&'hacks_enabled', [])
-	hacks.call_hook_enabled('tree_create', [tree])
-	return tree
-
 func new_state():
-	var tree = new_tree()
+	var tree = treeutils.new_tree()
 	state_trees.append(tree)
 	state_frames.append(0)
 	state_queued_hacks.append(hacks.enabled_hacks.duplicate())
 
-func clone_tree(from):
-	hacks.call_hook_enabled('tree_before_clone', [from])
-	var tree = from.duplicate()
-	RenderingServer.viewport_set_update_mode(tree.root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
-	tree.set_meta(&'hacks_enabled', from.get_meta(&'hacks_enabled').duplicate())
-	hacks.call_hook_enabled('tree_after_clone', [tree, from])
-	return tree
-
 func clone_state(state):
-	var tree = clone_tree(state_trees[state])
+	var tree = treeutils.clone_tree(state_trees[state])
 	state_trees.append(tree)
 	state_frames.append(state_frames[state])
 	state_queued_hacks.append(state_queued_hacks[state].duplicate())
@@ -357,20 +285,8 @@ func advance_state(state):
 	var tree = state_trees[state]
 	var frame = state_frames[state]
 	var input = get_input(frame)
-	advance_tree(tree, input, frame)
+	treeutils.advance_tree(tree, input, frame)
 	state_frames[state] += 1
-
-func advance_tree(tree, input, frame=-1):
-	var input_object = tree.get_input_object()
-	var input_events = convert_input_events(input)
-	for event in input_events:
-		if event is InputEvent:
-			input_object.parse_input_event(event)
-		else:
-			on_hack_event(tree, frame, event)
-	hacks.call_hook_filtered('tree_before_tick', tree.get_meta(&'hacks_enabled'), [tree], frame)
-	tree.frame()
-	hacks.call_hook_filtered('tree_after_tick', tree.get_meta(&'hacks_enabled'), [tree], frame)
 
 func flush_hack_queue(state):
 	var tree = state_trees[state]
@@ -389,7 +305,7 @@ func request_state_at(frame):
 
 func request_tree_at(frame):
 	var state : int = await request_state_at(frame)
-	return clone_tree(state_trees[state])
+	return treeutils.clone_tree(state_trees[state])
 
 func check_all_requested_targets():
 	for target in requested_targets:
