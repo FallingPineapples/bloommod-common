@@ -36,11 +36,32 @@ grow_horizontal = 0
 text = "Show Internal"
 alignment = 2
 
-[node name="LoadScript" type="FileDialog" parent="."]
+[node name="Dialogs" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+
+[node name="LoadScript" type="FileDialog" parent="Dialogs"]
 title = "Open a File"
 size = Vector2i(800, 600)
 ok_button_text = "Open"
 file_mode = 0
+access = 2
+filters = PackedStringArray("*.gd ; GDScript Files")
+
+[node name="SelectEmbedded" type="FileDialog" parent="Dialogs"]
+title = "Open File(s)"
+position = Vector2i(0, 36)
+size = Vector2i(800, 600)
+ok_button_text = "Open"
+file_mode = 1
+filters = PackedStringArray("*.gd ; GDScript Files")
+
+[node name="SaveEmbedded" type="FileDialog" parent="Dialogs"]
+title = "Save to a Directory"
+size = Vector2i(800, 600)
+ok_button_text = "Select Current Folder"
+mode_overrides_title = false
+file_mode = 2
 access = 2
 filters = PackedStringArray("*.gd ; GDScript Files")
 
@@ -50,4 +71,6 @@ filters = PackedStringArray("*.gd ; GDScript Files")
 [connection signal="item_edited" from="Tabs/Hacks" to="." method="_on_hacks_item_edited"]
 [connection signal="custom_popup_edited" from="Tabs/Scripts" to="." method="_on_scripts_custom_popup_edited"]
 [connection signal="toggled" from="ShowInternal" to="." method="update" unbinds=1]
-[connection signal="file_selected" from="LoadScript" to="." method="_on_load_script_file_selected"]
+[connection signal="file_selected" from="Dialogs/LoadScript" to="." method="_on_load_script_file_selected"]
+[connection signal="files_selected" from="Dialogs/SelectEmbedded" to="." method="_on_select_embedded_files_selected"]
+[connection signal="dir_selected" from="Dialogs/SaveEmbedded" to="." method="_on_save_embedded_dir_selected"]

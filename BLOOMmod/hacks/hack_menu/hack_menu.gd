@@ -3,6 +3,10 @@ extends Window
 var hacks = preload("res://BLOOMmod/hacks/manager.gd")
 
 @export_multiline var add_script_text = "Load script..."
+@export_multiline var save_embedded_text = "Save embedded script as..."
+
+const ACTION_ADD_SCRIPT = 0
+const ACTION_SAVE_EMBEDDED = 1
 
 func clear():
 	$Tabs/Hacks.clear()
@@ -52,6 +56,12 @@ func update_scripts_tab():
 	add_item.set_cell_mode(0, TreeItem.CELL_MODE_CUSTOM)
 	add_item.set_editable(0, true)
 	add_item.set_text(0, add_script_text)
+	add_item.set_metadata(0, ACTION_ADD_SCRIPT)
+	var save_item = root.create_child()
+	save_item.set_cell_mode(0, TreeItem.CELL_MODE_CUSTOM)
+	save_item.set_editable(0, true)
+	save_item.set_text(0, save_embedded_text)
+	save_item.set_metadata(0, ACTION_SAVE_EMBEDDED)
 
 var _blocked = 0
 func _on_hacks_item_edited():
@@ -64,8 +74,33 @@ func _on_hacks_item_edited():
 func _on_scripts_custom_popup_edited(arrow_clicked):
 	if arrow_clicked:
 		return
-	$LoadScript.popup_centered()
+	match $Tabs/Scripts.get_edited().get_metadata(0):
+		ACTION_ADD_SCRIPT:
+			$Dialogs/LoadScript.popup_centered()
+		ACTION_SAVE_EMBEDDED:
+			$Dialogs/SelectEmbedded.set_current_path("res://BLOOMmod/scripts/")
+			$Dialogs/SelectEmbedded.popup_centered()
+		_: push_error("Unknown action in hack_menu")
 
 func _on_load_script_file_selected(path):
 	hacks.load_script(path)
 	update()
+
+var _paths
+func _on_select_embedded_files_selected(paths):
+	_paths = paths
+	$Dialogs/SaveEmbedded.popup_centered()
+
+func _on_save_embedded_dir_selected(dir):
+	for path in _paths:
+		var data = FileAccess.get_file_as_bytes(path)
+		if !data:
+			push_error("Error code '%s' opening '%s'" % [error_string(FileAccess.get_open_error()), path])
+			continue
+		var new_path = dir.path_join(path.get_file())
+		var f = FileAccess.open(new_path, FileAccess.WRITE)
+		if !f:
+			push_error("Error code '%s' opening '%s'" % [error_string(FileAccess.get_open_error()), new_path])
+			continue
+		f.store_buffer(data)
+		f.close()

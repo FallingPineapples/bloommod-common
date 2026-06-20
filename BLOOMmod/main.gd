@@ -249,7 +249,7 @@ func save_tas(path):
 func load_tas(path):
 	var data = FileAccess.get_file_as_bytes(path)
 	if !data:
-		push_error("Error code '%d' opening '%s'" % [error_string(FileAccess.get_open_error()), path])
+		push_error("Error code '%s' opening '%s'" % [error_string(FileAccess.get_open_error()), path])
 		return
 	set_main_timeline(Timeline.deserialized(data))
 
