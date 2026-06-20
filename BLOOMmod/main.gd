@@ -3,11 +3,12 @@ extends Node
 const hacks = preload("res://BLOOMmod/hacks/manager.gd")
 const treeutils = preload("res://BLOOMmod/utils/tree.gd")
 const inpututils = preload("res://BLOOMmod/utils/inputs.gd")
+const Timeline = preload("res://BLOOMmod/utils/timeline.gd")
 
 var target_frame = 0
 var bookmarks = []
-var inputs = []
-var rendered_state = -1
+var main_timeline: Timeline = null
+var rendered_tree: WeakRef = weakref(null)
 
 var frame_progress = 0.0
 var current_speed = 1.0
@@ -20,23 +21,14 @@ var last_recorded_frame = 0
 var encoding = false
 var ENCODE_TMP_PATH = "user://encode_tas.txt"
 
-var state_frames = []
-var state_trees = []
-var state_queued_hacks = []
-
-var requested_targets = []
-var _FRAME_SIGNAL_FMT = "_frame_%d"
-
-var _states_locked = false
-var _queued_invalidation = -1
-
 signal toast
 
 func _ready():
 	PhysicsServer2D.set_active(false)
 	get_tree().root.set_embedding_subwindows(false)
-	RenderingServer.viewport_set_update_mode(get_tree().root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
+	treeutils.set_tree_render(get_tree(), false)
 	RenderingServer.viewport_attach_to_screen(get_tree().root.get_viewport_rid(), Rect2(), DisplayServer.INVALID_WINDOW_ID)
+	$input_editor.main.bloom = self
 	encoding = OS.has_feature('movie')
 	if not encoding:
 		$input_editor.window_input.connect(_input)
@@ -103,19 +95,25 @@ func _input(event):
 						show_window($hack_menu)
 					else:
 						show_window($input_editor)
-						update_input_editor(true)
+						update_input_editor()
 		if k.pressed and !k.echo and k.is_command_or_control_pressed():
 			match k.physical_keycode:
 				KEY_S:
-					$dialogs/save.popup_centered()
+					if main_timeline:
+						$dialogs/save.popup_centered()
+					else:
+						toast.emit("No tas loaded")
 				KEY_O:
-					if len(inputs) == 0:
+					if main_timeline == null:
 						$dialogs/load.popup_centered()
 					else:
 						pass # TODO: notify user?
 				KEY_E:
-					$dialogs/encode.popup_centered()
-	hacks.call_hook_enabled_at('input', target_frame, [event])
+					if main_timeline:
+						$dialogs/encode.popup_centered()
+					else:
+						toast.emit("No tas loaded")
+	hacks.call_hook_enabled_at('input', target_frame, [event], main_timeline)
 
 # TODO: warn when closing without saving
 
@@ -130,8 +128,9 @@ func _process(delta):
 		return
 	update_frame(delta)
 	update_recording()
-	balance_distribution(10000)
-	update_rendering()
+	if main_timeline:
+		main_timeline.balance_distribution(10000) # TODO: should this do all timelines?
+		update_rendering()
 	hacks.call_hook_enabled('process')
 
 func update_frame(delta):
@@ -171,6 +170,7 @@ func toggle_recording():
 func start_recording():
 	if recording:
 		return
+	ensure_main_timeline()
 	recording = true
 	last_recorded_frame = target_frame
 	toast.emit("Started recording")
@@ -195,65 +195,22 @@ func clamp_start():
 		stop_and_reset()
 
 func clamp_end():
-	if target_frame >= len(inputs):
-		target_frame = len(inputs) - 1
+	if target_frame >= main_timeline.len():
+		target_frame = main_timeline.len() - 1
 		if target_frame < 0:
 			target_frame = 0
 		stop_and_reset()
 
 func expand_end():
-	if target_frame < len(inputs):
+	if target_frame < main_timeline.len():
 		return
-	while target_frame >= len(inputs):
-		inputs.append([])
-	update_input_editor()
+	while target_frame >= main_timeline.len():
+		main_timeline.inputs.append([])
+	main_timeline.invalidate_at(target_frame)
 
-func update_input_editor(full=false):
+func update_input_editor():
 	if $input_editor.visible:
-		if full:
-			$input_editor.update()
-		else:
-			$input_editor.redraw()
-
-func invalidate_after(frame):
-	if _states_locked:
-		if _queued_invalidation == -1:
-			_queued_invalidation = frame
-		else:
-			_queued_invalidation = min(_queued_invalidation, frame)
-	else:
-		_invalidate_after(frame)
-	hacks.invalidate_after(frame)
-	update_hack_menu()
-
-func _invalidate_after(frame):
-	var i = 0
-	while i < len(state_frames):
-		if state_frames[i] > frame:
-			hacks.call_hook_enabled('tree_delete', [state_trees[i]])
-			state_frames.remove_at(i)
-			state_trees.pop_at(i).free()
-			state_queued_hacks.remove_at(i)
-			if rendered_state == i:
-				rendered_state = -1
-			elif rendered_state > i:
-				rendered_state -= 1
-		else:
-			i += 1
-
-func on_hack_enabled(hack_id):
-	for state in len(state_frames):
-		state_queued_hacks[state].append(hack_id)
-		treeutils._set_hack_enabled(state_trees[state], hack_id, true)
-
-func on_hack_disabled(hack_id):
-	for state in len(state_frames):
-		var i = state_queued_hacks[state].find(hack_id)
-		if i == -1:
-			hacks.call_hook('tree_disable', hack_id, [state_trees[state]], state_frames[state])
-		else:
-			state_queued_hacks[state].remove_at(i)
-		treeutils._set_hack_enabled(state_trees[state], hack_id, false)
+		$input_editor.update()
 
 func add_current_hack_event(userdata, frame):
 	hacks.add_current_hack_event(userdata, frame)
@@ -261,234 +218,40 @@ func add_current_hack_event(userdata, frame):
 func get_current_frame():
 	return hacks.current_frame
 
+func get_current_timeline():
+	return hacks.current_timeline
+
 func update_hack_menu():
 	$hack_menu.update()
 
-func new_state():
-	var tree = treeutils.new_tree()
-	state_trees.append(tree)
-	state_frames.append(0)
-	state_queued_hacks.append(hacks.enabled_hacks.duplicate())
-
-func clone_state(state):
-	var tree = treeutils.clone_tree(state_trees[state])
-	state_trees.append(tree)
-	state_frames.append(state_frames[state])
-	state_queued_hacks.append(state_queued_hacks[state].duplicate())
-
-func advance_state(state):
-	flush_hack_queue(state)
-	var tree = state_trees[state]
-	var frame = state_frames[state]
-	var input = inpututils.get_input(inputs, frame)
-	treeutils.advance_tree(tree, input, frame)
-	state_frames[state] += 1
-
-func flush_hack_queue(state):
-	var tree = state_trees[state]
-	var frame = state_frames[state]
-	for hack_id in state_queued_hacks[state]:
-		hacks.call_hook('tree_enable', hack_id, [tree], frame)
-	state_queued_hacks[state] = []
-
-func request_state_at(frame):
-	var sig_name = StringName(_FRAME_SIGNAL_FMT % frame)
-	if not has_user_signal(sig_name):
-		add_user_signal(sig_name, [{'name':"tree",'type':TYPE_OBJECT}])
-	if not requested_targets.has(frame):
-		requested_targets.append(frame)
-	return Signal(self, sig_name)
-
-func request_tree_at(frame):
-	var state : int = await request_state_at(frame)
-	return treeutils.clone_tree(state_trees[state])
-
-func check_all_requested_targets():
-	for target in requested_targets:
-		if state_frames.has(target):
-			check_requested_targets(state_frames.find(target))
-
-func check_requested_targets(state):
-	var frame = state_frames[state]
-	if requested_targets.has(frame):
-		requested_targets.erase(frame)
-		emit_signal(_FRAME_SIGNAL_FMT % frame, state)
-
-func get_hotspots():
-	var hotspots = []
-	if paused or reverse:
-		# when possible, omit moving hotspots for smoothness
-		hotspots.append(target_frame)
-	hotspots.append_array(bookmarks)
-	return hotspots
-
-func get_targets():
-	# target_frame needs to be rendered, so it is added unconditionally
-	var targets = [target_frame]
-	targets.append_array(requested_targets)
-	for hotspot in get_hotspots():
-		for target_rate in [1, 23, 47, 89, 409, 1499, 4013, 14503]:
-			var target = floori(hotspot / target_rate) * target_rate
-			if target >= 0 and target not in targets:
-				targets.append(target)
-	return targets
-
-func balance_distribution(max_usec):
-	if _states_locked:
-		push_warning("balance_distribution recursion")
-		return
-	_states_locked = true
-	_balance_distribution(max_usec)
-	_states_locked = false
-	if _queued_invalidation != -1:
-		_invalidate_after(_queued_invalidation)
-	_queued_invalidation = -1
-
-# TODO: trim the ton of states after the target
-func _balance_distribution(max_usec):
-	check_all_requested_targets()
-	var end_usec = Time.get_ticks_usec() + max_usec
-	var targets = get_targets()
-	var states_used = []
-	states_used.resize(len(state_frames))
-	states_used.fill(false)
-	for target in targets:
-		var state = state_frames.find(target)
-		if state != -1:
-			states_used[state] = true
-	for target in targets:
-		if Time.get_ticks_usec() > end_usec:
-			return
-		if target in state_frames:
-			continue
-		var fastest_state = -1
-		var fastest_cost = target + 20
-		for state in len(state_frames):
-			var frame = state_frames[state]
-			if frame > target:
-				continue
-			if _queued_invalidation != -1:
-				if frame > _queued_invalidation:
-					continue
-			# TODO: remember expensive frames?
-			var cost = target - frame
-			if states_used[state]:
-				cost += 100
-			if cost < fastest_cost:
-				fastest_state = state
-				fastest_cost = cost
-		if fastest_state == -1:
-			new_state()
-			if Time.get_ticks_usec() > end_usec:
-				return
-			states_used.append(false)
-			fastest_state = len(state_frames) - 1
-		if states_used[fastest_state]:
-			clone_state(fastest_state)
-			if Time.get_ticks_usec() > end_usec:
-				return
-			states_used.append(false)
-			fastest_state = len(state_frames) - 1
-		# TODO: this frequently skips over other targets
-		while state_frames[fastest_state] != target:
-			if _queued_invalidation != -1:
-				if state_frames[fastest_state] >= _queued_invalidation:
-					break
-			advance_state(fastest_state)
-			if Time.get_ticks_usec() > end_usec:
-				return
-		check_requested_targets(fastest_state)
-		states_used[fastest_state] = true
-
 func update_rendering():
-	if rendered_state != -1:
-		RenderingServer.viewport_set_update_mode(state_trees[rendered_state].root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_DISABLED)
-	rendered_state = -1
-	for state in len(state_frames):
-		if state_frames[state] == target_frame:
-			RenderingServer.viewport_set_update_mode(state_trees[state].root.get_viewport_rid(), RenderingServer.VIEWPORT_UPDATE_WHEN_VISIBLE)
-			rendered_state = state
-			flush_hack_queue(state)
-			hacks.call_hook_enabled('tree_render', [state_trees[state]])
-			update_hack_menu()
-			break
+	var state = main_timeline.find_state_at(target_frame)
+	if state == -1:
+		if rendered_tree.get_ref() != null:
+			treeutils.set_tree_render(rendered_tree.get_ref(), false)
+			rendered_tree = weakref(null)
+	else:
+		var tree = main_timeline.get_tree(state)
+		if rendered_tree.get_ref() != tree:
+			if rendered_tree.get_ref() != null:
+				treeutils.set_tree_render(rendered_tree.get_ref(), false)
+		treeutils.set_tree_render(tree, true)
+		rendered_tree = weakref(tree)
+		main_timeline.flush_hack_queue(state)
+		hacks.call_hook_enabled('tree_render', [tree], target_frame, main_timeline)
+	update_hack_menu()
 
 func save_tas(path):
 	var f = FileAccess.open(path, FileAccess.WRITE)
-	var count = 0
-	for frame in inputs:
-		if len(frame) != 0 and count != 0:
-			f.store_line(str(count))
-			count = 0
-		for input in frame:
-			if input is InputEvent:
-				if input is InputEventAction:
-					var prefix = '+' if input.pressed else '-'
-					f.store_line(prefix + input.action)
-				else:
-					push_warning("Could not save unsupported InputEvent type: %s" % input.get_class()) # TODO
-			elif input is Array:
-				if input[1] is Object or input[1] is Signal or input[1] is Callable:
-					push_warning("Could not save hack data; unsupported data type: %s" % input.get_class())
-				else:
-					var data = Marshalls.variant_to_base64(input[1], false)
-					f.store_line(':' + hacks.hacks[input[0]] + ':' + data)
-			else:
-				push_warning("Could not save unknown input type: %s" % input.get_class())
-		count += 1
-	if count != 0:
-		f.store_line(str(count))
+	f.store_buffer(main_timeline.serialized())
 	f.close()
 
 func load_tas(path):
-	var f = FileAccess.open(path, FileAccess.READ)
-	if !f:
-		push_error("Error code %d opening '%s'" % [FileAccess.get_open_error(), path])
+	var data = FileAccess.get_file_as_bytes(path)
+	if !data:
+		push_error("Error code '%d' opening '%s'" % [error_string(FileAccess.get_open_error()), path])
 		return
-	inputs = [[]]
-	invalidate_after(0)
-	while not f.eof_reached():
-		var line = f.get_line()
-		if line == "":
-			continue
-		if line.left(1) in ['+', '-']:
-			var action = line.right(-1)
-			if not InputMap.has_action(action):
-				push_warning("Unknown action '%s'" % action)
-				continue
-			var event = InputEventAction.new()
-			event.action = action
-			event.pressed = line.left(1) == '+'
-			inputs[-1].append(event)
-		elif line.left(1) == ':':
-			var event_data = line.right(-1).split(':', true, 1)
-			if len(event_data) != 2:
-				push_warning("Could not decode '%s' (no separator)" % line)
-				continue
-			var hack_id = hacks.hacks.find(event_data[0])
-			if hack_id == -1:
-				push_warning("Hack '%s' does not exist (script not loaded?)" % event_data[0])
-				continue
-			var data = Marshalls.base64_to_variant(event_data[1], false)
-			var event = [hack_id, data]
-			inputs[-1].append(event)
-		elif line.is_valid_int():
-			var count = int(line)
-			var err = inputs.resize(len(inputs) + count)
-			if err:
-				push_error("Error code %d extending by '%s'" % [err, line])
-				break
-			for i in count:
-				inputs[i - count] = []
-		else:
-			push_warning("Could not decode '%s'" % line)
-	if len(inputs[-1]) == 0:
-		inputs.pop_back()
-	else:
-		push_warning("No final frame count")
-	f.close()
-	update_input_editor()
-	update_hack_menu()
+	set_main_timeline(Timeline.deserialized(data))
 
 func encode_tas(path):
 	save_tas(ENCODE_TMP_PATH)
@@ -500,17 +263,46 @@ func encode_tas(path):
 
 func _start_encode():
 	load_tas(ENCODE_TMP_PATH)
-	new_state()
+	main_timeline.new_state()
 	paused = false
 
 func _physics_process(_delta):
 	if not encoding:
+		set_physics_process(false)
 		return
 	if paused:
 		return
-	target_frame = state_frames[0] + 1
-	if target_frame >= len(inputs):
+	target_frame = main_timeline.state_frames[0] + 1
+	if target_frame >= main_timeline.len():
 		get_tree().quit()
 		return
-	advance_state(0)
+	main_timeline.advance_state(0)
 	update_rendering()
+
+func set_main_timeline(timeline: Timeline) -> void:
+	if main_timeline:
+		main_timeline.remove_target_source(_get_target_frame_targets)
+		main_timeline.remove_hotspot_source(_get_main_hotspots)
+	main_timeline = timeline
+	if main_timeline:
+		main_timeline.add_target_source(_get_target_frame_targets, 0)
+		main_timeline.add_hotspot_source(_get_main_hotspots)
+	$input_editor.set_timeline(main_timeline)
+	update_hack_menu()
+
+func ensure_main_timeline() -> void:
+	if main_timeline == null:
+		set_main_timeline(Timeline.new())
+		toast.emit("Blank TAS created")
+
+# target_frame needs to be rendered, so it is added unconditionally
+func _get_target_frame_targets() -> Array[int]:
+	return [target_frame]
+
+func _get_main_hotspots() -> Array[int]:
+	var hotspots: Array[int] = []
+	if paused or reverse:
+		# when possible, omit moving hotspots for smoothness
+		hotspots.append(target_frame)
+	hotspots.append_array(bookmarks)
+	return hotspots

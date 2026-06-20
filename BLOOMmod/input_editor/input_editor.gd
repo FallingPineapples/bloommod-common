@@ -1,8 +1,8 @@
 extends Window
 
+const hacks = preload("res://BLOOMmod/hacks/manager.gd")
 const inpututils = preload("res://BLOOMmod/utils/inputs.gd")
-
-# https://www.youtube.com/watch?v=4Na0Jk2WeVw
+const Timeline = preload("res://BLOOMmod/utils/timeline.gd")
 
 var frame_width = 100
 var main_actions = []
@@ -66,7 +66,6 @@ func update_hacks():
 	hack_widths.clear()
 	hack_ids.clear()
 	hack_lookup.clear()
-	var hacks = bloommod.hacks
 	for id in range(len(hacks.hacks)):
 		if not hacks.hack_scheduled[id]:
 			continue
@@ -125,9 +124,10 @@ func draw_data(canvas, position, text):
 			(position.y + 0.5) * row_height - (descent - ascent) / 2),
 		text, HORIZONTAL_ALIGNMENT_CENTER, current_widths[position.x], font_size)
 
-func _invalidate_after(frame):
-	main.queue_redraw()
-	bloommod.invalidate_after(frame)
+func set_timeline(timeline: Timeline) -> void:
+	main.set_timeline(timeline)
+	if visible:
+		redraw()
 
 # TODO: seems hacky, probably needs refactoring
 func record(from_frame, to_frame):
@@ -136,11 +136,11 @@ func record(from_frame, to_frame):
 		for action in tab:
 			var value
 			if is_hacks_tab(tab_id):
-				value = bloommod.hacks.is_hack_enabled(hack_ids[action], from_frame, false)
-				inpututils.set_actions(from_frame + 1, to_frame, action, value, tab_id)
+				value = hacks.is_hack_enabled(hack_ids[action], from_frame, main.timeline, false)
+				inpututils.set_actions(main.timeline.inputs, from_frame + 1, to_frame, action, value)
 			else:
 				value = Input.is_action_pressed(action)
-				inpututils.set_actions(from_frame, to_frame - 1, action, value, tab_id)
+				inpututils.set_actions(main.timeline.inputs, from_frame, to_frame - 1, action, value)
 	if visible:
 		redraw()
-	bloommod.invalidate_after(from_frame)
+	main.timeline.invalidate(from_frame, to_frame)

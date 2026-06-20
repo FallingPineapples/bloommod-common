@@ -1,11 +1,14 @@
 extends Control
 
 const inpututils = preload("res://BLOOMmod/utils/inputs.gd")
+const Timeline = preload("res://BLOOMmod/utils/timeline.gd")
+
 const _input_editor = preload("res://BLOOMmod/input_editor/input_editor.gd")
-const _bloommod = preload("res://BLOOMmod/main.gd")
 
 var main: _input_editor
-@onready var bloommod: _bloommod = $/root/main
+var bloom
+
+var timeline: Timeline
 
 var mouse_down_cell = Vector2i()
 var mouse_down_value = false
@@ -13,7 +16,10 @@ var mouse_down_swift = false
 
 func update_size():
 	custom_minimum_size.x = main.current_positions[-1] + 1
-	custom_minimum_size.y = len(bloommod.inputs) * main.row_height + 1
+	if timeline == null:
+		custom_minimum_size.y = 1
+		return
+	custom_minimum_size.y = timeline.len() * main.row_height + 1
 
 func _gui_input(event):
 	if event is InputEventMouseButton:
@@ -21,7 +27,8 @@ func _gui_input(event):
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if cell.x == 0:
 				if event.pressed:
-					bloommod.target_frame = cell.y
+					# TODO: decouple this somehow?
+					bloom.target_frame = cell.y
 			else:
 				if event.pressed:
 					mouse_down_cell = cell
@@ -37,7 +44,7 @@ func _gui_input(event):
 						set_cells(mouse_down_cell, cell, mouse_down_value)
 
 func _find_cell(position):
-	var frame = clamp(floor(position.y/main.row_height), 0, len(bloommod.inputs) - 1)
+	var frame = clamp(floor(position.y/main.row_height), 0, timeline.len() - 1)
 	var min = 0
 	var max = len(main.current_positions) - 2
 	while min < max:
@@ -57,16 +64,21 @@ func _get_action(cell_x):
 	return _map_action(main.current_actions[cell_x - 1])
 
 func get_cell(cell):
-	return inpututils.get_action(bloommod.inputs, cell.y, _get_action(cell.x))
+	return inpututils.get_action(timeline.inputs, cell.y, _get_action(cell.x))
 
 func toggle_cell(cell):
-	return inpututils.toggle_action(bloommod.inputs, cell.y, _get_action(cell.x))
+	var value = inpututils.toggle_action(timeline.inputs, cell.y, _get_action(cell.x))
+	_invalidate_at(cell.y)
+	return value
 
 func set_cells(cell_from, cell_to, value):
-	inpututils.set_actions(bloommod.inputs, cell_from.y, cell_to.y, _get_action(cell_from.x), value)
+	inpututils.set_actions(timeline.inputs, cell_from.y, cell_to.y, _get_action(cell_from.x), value)
+	_invalidate(cell_from.y, cell_to.y)
 
 func toggle_cell_swift(cell):
-	return inpututils.toggle_swift_action(bloommod.inputs, cell.y, _get_action(cell.x))
+	var value = inpututils.toggle_swift_action(timeline.inputs, cell.y, _get_action(cell.x))
+	_invalidate_at(cell.y)
+	return value
 
 func set_cells_swift(cell_from, cell_to, value):
 	var action = _get_action(cell_from.x)
@@ -75,7 +87,8 @@ func set_cells_swift(cell_from, cell_to, value):
 		cell_from = cell_to
 		cell_to = tmp
 	for y in range(cell_from.y, cell_to.y + 1):
-		inpututils.set_swift_action(bloommod.inputs, y, action, value)
+		inpututils.set_swift_action(timeline.inputs, y, action, value)
+	_invalidate(cell_from.y, cell_to.y)
 
 func _find_column(action):
 	if action is int:
@@ -90,7 +103,9 @@ func _find_column(action):
 # TODO: mitigate lag for long tases
 # TODO: unknown input combinations
 func _draw():
-	var length = len(bloommod.inputs)
+	if timeline == null:
+		return
+	var length = timeline.len()
 	main.draw_grid(self, 0, length)
 	var current_data = []
 	current_data.resize(len(main.current_actions))
@@ -99,7 +114,7 @@ func _draw():
 	counts.resize(len(main.current_actions))
 	for frame in range(0, length):
 		counts.fill(0)
-		for event in bloommod.inputs[frame]:
+		for event in timeline.inputs[frame]:
 			var column = _find_column(inpututils.event_action(event))
 			if column == -1:
 				continue
@@ -119,7 +134,26 @@ func _draw():
 			if text != '':
 				main.draw_data(self, Vector2i(column + 1, frame), text)
 
+func _invalidate_at(frame):
+	timeline.invalidate_at(frame)
+
+func _invalidate(frame_from, frame_to):
+	timeline.invalidate(frame_from, frame_to)
+
+func set_timeline(new_timeline: Timeline):
+	if timeline:
+		timeline.invalidated.disconnect(_on_invalidated)
+	timeline = new_timeline
+	if timeline:
+		timeline.invalidated.connect(_on_invalidated)
+
+func _on_invalidated(_frame_from, _frame_to):
+	if not main.visible:
+		return
+	# TODO: use given frame info
+	queue_redraw()
+
 func _process(_delta):
 	$Panel.size = Vector2(main.current_positions[-1], main.row_height)
-	$Panel.position = Vector2(main.current_positions[0], main.row_height * bloommod.target_frame)
+	$Panel.position = Vector2(main.current_positions[0], main.row_height * bloom.target_frame)
 	# $Panel.visible = bloommod.tasing

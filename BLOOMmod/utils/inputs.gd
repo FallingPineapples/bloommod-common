@@ -1,9 +1,11 @@
+const hacks = preload("res://BLOOMmod/hacks/manager.gd")
+
 static func get_input(inputs: Array[Array], frame: int) -> Array:
 	if frame >= len(inputs):
 		return []
 	return inputs[frame]
 
-static func get_action(inputs: Array[Array], frame: int, action) -> bool:
+static func get_action(inputs: Array[Array], frame: int, action, start_value:bool=false) -> bool:
 	for f in range(frame, -1, -1):
 		var data = inputs[f]
 		for i in range(len(data) - 1, -1, -1):
@@ -125,3 +127,73 @@ static func event_matches(event, action) -> bool:
 		if not event is InputEventAction:
 			return false
 		return event.action == action
+
+static func serialize(inputs: Array[Array]) -> PackedByteArray:
+	var lines := PackedStringArray()
+	var count := 0
+	for frame in inputs:
+		if len(frame) != 0 and count != 0:
+			lines.append(str(count))
+			count = 0
+		for input in frame:
+			if input is InputEvent:
+				if input is InputEventAction:
+					var prefix := '+' if input.pressed else '-'
+					lines.append(prefix + input.action)
+				else:
+					push_warning("Could not save unsupported InputEvent type: %s" % input.get_class()) # TODO
+			elif input is Array:
+				if input[1] is Object or input[1] is Signal or input[1] is Callable:
+					push_warning("Could not save hack data; unsupported data type: %s" % input.get_class())
+				else:
+					var data = Marshalls.variant_to_base64(input[1], false)
+					lines.append(':' + hacks.hacks[input[0]] + ':' + data)
+			else:
+				push_warning("Could not save unknown input type: %s" % input.get_class())
+		count += 1
+	if count != 0:
+		lines.append(str(count))
+	var out = '\n'.join(lines) + '\n'
+	return out.to_utf8_buffer()
+
+static func deserialize(data: PackedByteArray) -> Array[Array]:
+	var lines := data.get_string_from_utf8().split('\n')
+	var inputs: Array[Array] = [[]]
+	for line in lines:
+		if line == "":
+			continue
+		if line.left(1) in ['+', '-']:
+			var action := line.right(-1)
+			if not InputMap.has_action(action):
+				push_warning("Unknown action '%s'" % action)
+				continue
+			var event := InputEventAction.new()
+			event.action = action
+			event.pressed = line.left(1) == '+'
+			inputs[-1].append(event)
+		elif line.left(1) == ':':
+			var event_data := line.right(-1).split(':', true, 1)
+			if len(event_data) != 2:
+				push_warning("Could not decode '%s' (no separator)" % line)
+				continue
+			var hack_id := hacks.hacks.find(event_data[0])
+			if hack_id == -1:
+				push_warning("Hack '%s' does not exist (script not loaded?)" % event_data[0])
+				continue
+			var event = [hack_id, Marshalls.base64_to_variant(event_data[1], false)]
+			inputs[-1].append(event)
+		elif line.is_valid_int():
+			var count := int(line)
+			var err := inputs.resize(len(inputs) + count)
+			if err:
+				push_error("Error code '%s' extending by '%s'" % [error_string(err), line])
+				break
+			for i in count:
+				inputs[i - count] = []
+		else:
+			push_warning("Could not decode '%s'" % line)
+	if len(inputs[-1]) == 0:
+		inputs.pop_back()
+	else:
+		push_warning("No final frame count")
+	return inputs

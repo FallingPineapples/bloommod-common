@@ -1,8 +1,10 @@
-static var internal_scripts = [
+const internal_scripts = [
 	'framework',
 	'overlay',
 	'freecam',
 ]
+
+const inpututils = preload("res://BLOOMmod/utils/inputs.gd")
 
 static var scripts = []
 static var hacks = []
@@ -13,8 +15,6 @@ static var hack_internal = []
 static var hack_scheduled = []
 
 static var enabled_hacks = []
-static var _enabled_at_hacks_cache = []
-static var _enabled_at_cache_frame = -1
 
 static var script_objects = []
 static var hack_owners = []
@@ -22,6 +22,7 @@ static var hack_owners = []
 static var bloom = null
 
 static var current_hack_id = -1
+static var current_timeline = null
 static var current_frame = -1
 
 static func load_script(script, internal=false):
@@ -66,6 +67,7 @@ static func load_script(script, internal=false):
 				hack_scheduled[hack_id] = true
 			if internal_hack or object.get('default_enable_%s' % hack_name):
 				enable_hack(hack_id)
+	bloom.update_input_editor()
 	return id
 
 static func load_internal_scripts():
@@ -79,7 +81,6 @@ static func add_hack(script_id, hack_name, internal=false):
 	hack_internal.append(internal)
 	hack_enabled.append(false)
 	hack_scheduled.append(false)
-	_enabled_at_hacks_cache.append(false)
 	return id
 
 static func enable_hack(id):
@@ -91,7 +92,9 @@ static func enable_hack(id):
 		hack_enabled[id] = true
 		enabled_hacks.insert(enabled_hacks.bsearch(id), id)
 		call_hook('enable', id)
-		bloom.on_hack_enabled(id)
+		# TODO: trigger this for all timelines?
+		if bloom.main_timeline:
+			bloom.main_timeline._on_hack_enabled(id)
 
 static func disable_hack(id):
 	if hack_internal[id]:
@@ -104,7 +107,9 @@ static func disable_hack(id):
 		hack_enabled[id] = false
 		enabled_hacks.erase(id)
 		call_hook('disable', id)
-		bloom.on_hack_disabled(id)
+		# TODO: trigger this for all timelines?
+		if bloom.main_timeline:
+			bloom.main_timeline._on_hack_disabled(id)
 
 static func set_hack_enabled(id, enable):
 	if enable:
@@ -112,48 +117,66 @@ static func set_hack_enabled(id, enable):
 	else:
 		disable_hack(id)
 
-static func is_hack_enabled(id, frame=-1, update_cache=true):
+const _CACHE_META = &"_hacks_enabled_at_cache"
+
+static func is_hack_enabled(id, frame=-1, timeline=null, update_cache=true):
 	if hack_scheduled[id]:
+		if timeline == null:
+			timeline = bloom.main_timeline
+			if timeline == null:
+				return false
+			update_cache = (frame == -1)
 		if frame == -1:
 			frame = bloom.target_frame
-		if frame != _enabled_at_cache_frame:
-			if update_cache:
-				update_enabled_at_cache(frame)
-			else:
-				return _is_hack_enabled(id, frame)
-		return _enabled_at_hacks_cache[id]
+		if timeline.has_meta(_CACHE_META):
+			var cache = timeline.get_meta(_CACHE_META)
+			if frame == cache.frame and cache.has(id):
+				return cache[id]
+		if update_cache:
+			_update_enabled_at_cache(frame, timeline)
+			return timeline.get_meta(_CACHE_META)[id]
+		else:
+			return _is_hack_enabled(id, frame, timeline)
 	else:
 		return hack_enabled[id]
 
-static func update_enabled_at_cache(frame):
+static func _update_enabled_at_cache(frame, timeline):
+	if not timeline.has_meta(_CACHE_META):
+		timeline.set_meta(_CACHE_META, {&"frame": -1})
+		timeline.invalidated.connect(func (f, t): _on_invalidated(timeline, f, t))
+	var cache = timeline.get_meta(_CACHE_META)
 	for id in range(len(hacks)):
-		_enabled_at_hacks_cache[id] = _is_hack_enabled(id, frame)
-	_enabled_at_cache_frame = frame
-	
-static func _is_hack_enabled(id, frame):
+		cache[id] = _is_hack_enabled(id, frame, timeline)
+	cache.frame = frame
+
+static func _is_hack_enabled(id, frame, timeline):
 	var start = -1
-	if frame > _enabled_at_cache_frame:
-		start = _enabled_at_cache_frame
+	if timeline.has_meta(_CACHE_META):
+		var cache = timeline.get_meta(_CACHE_META)
+		if frame > cache.frame and cache.has(id):
+			start = cache.frame
 	for f in range(frame, start, -1):
-		if f >= len(bloom.inputs):
+		if f >= len(timeline.inputs):
 			continue
-		var data = bloom.inputs[f]
+		var data = timeline.inputs[f]
 		for i in range(len(data) - 1, -1, -1):
-			if not data[i] is Array:
-				continue
 			var event = data[i]
-			if event[1] is bool and id == event[0]:
-				return event[1]
+			if inpututils.event_matches(event, id):
+				return inpututils.event_pressed(event)
 	if start == -1:
 		return false
 	else:
-		return _enabled_at_hacks_cache[id]
+		return timeline.get_meta(_CACHE_META)[id]
 
-static func invalidate_after(frame):
-	if _enabled_at_cache_frame >= frame:
-		_enabled_at_cache_frame = -1
+static func _on_invalidated(timeline, frame_from, _frame_to):
+	if timeline.has_meta(_CACHE_META):
+		var cache = timeline.get_meta(_CACHE_META)
+		if cache.frame >= frame_from:
+			cache.frame = -1
+	if timeline == bloom.main_timeline:
+		bloom.update_hack_menu()
 
-static func call_hook(hook, id, args=[], frame=-1):
+static func call_hook(hook, id, args=[], timeline=null, frame=-1):
 	var hack_name = hacks[id]
 	var method = "%s_%s" % [hook, hack_name]
 	var owner = script_objects[hack_owners[id]]
@@ -162,42 +185,44 @@ static func call_hook(hook, id, args=[], frame=-1):
 		var prev_frame = current_frame
 		current_hack_id = id
 		current_frame = frame
+		current_timeline = timeline
 		owner.callv(method, args)
 		current_hack_id = prev_hack_id
 		current_frame = prev_frame
 
-static func call_hook_filtered(hook, filter, args=[], frame=-1):
+static func call_hook_filtered(hook, filter, args=[], timeline=null, frame=-1):
 	for id in range(len(filter)):
 		if not filter[id]:
 			continue
-		call_hook(hook, id, args, frame)
+		call_hook(hook, id, args, timeline, frame)
 
-static func call_hook_enabled(hook, args=[]):
+static func call_hook_enabled(hook, args=[], frame=-1, timeline=null):
 	for id in enabled_hacks:
-		call_hook(hook, id, args)
+		call_hook(hook, id, args, timeline, frame)
 
-static func call_hook_enabled_at(hook, frame, args=[]):
+static func call_hook_enabled_at(hook, frame, args=[], timeline=null):
 	for id in range(len(hacks)):
 		if not is_hack_enabled(id, frame):
 			continue
-		call_hook(hook, id, args)
+		call_hook(hook, id, args, timeline, frame)
 
 static func add_current_hack_event(userdata, frame):
 	if current_hack_id == -1:
 		push_error("must be called in a hook")
 		return
-	add_hack_event([current_hack_id, userdata], frame)
+	add_hack_event([current_hack_id, userdata], frame, current_timeline)
 
-static func add_hack_event(event, frame):
-	while frame >= len(bloom.inputs):
-		bloom.inputs.append([])
-	bloom.inputs[frame].append(event)
-	bloom.invalidate_after(frame)
-	bloom.update_input_editor()
+static func add_hack_event(event, frame, timeline=null):
+	if timeline == null:
+		timeline = bloom.main_timeline
+	while frame >= len(timeline.inputs):
+		timeline.inputs.append([])
+	timeline.inputs[frame].append(event)
+	timeline.invalidate_at(frame)
 
-static func on_hack_event(tree, frame, event):
+static func on_hack_event(tree, timeline, frame, event):
 	if event[1] is bool:
 		var hook = 'tree_enable' if event[1] else 'tree_disable'
-		call_hook(hook, event[0], [tree], frame)
+		call_hook(hook, event[0], [tree], timeline, frame)
 	else:
-		call_hook('data_event', event[0], [tree, event[1]], frame)
+		call_hook('data_event', event[0], [tree, event[1]], timeline, frame)
